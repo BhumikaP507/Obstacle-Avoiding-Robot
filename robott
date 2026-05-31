@@ -1,0 +1,156 @@
+/*
+ * OBSTACLE AVOIDING ROBOT — ESP32
+ * Pins: Front HC-SR04: TRIG=5, ECHO=18
+ *       Left  HC-SR04: TRIG=19, ECHO=21
+ *       Right HC-SR04: TRIG=22, ECHO=23
+ *       Left  Motor:   ENA=25, IN1=26, IN2=27
+ *       Right Motor:   ENB=14, IN3=12, IN4=13
+ */
+
+#define TRIG_FRONT 5
+#define ECHO_FRONT 18
+#define TRIG_LEFT  19
+#define ECHO_LEFT  21
+#define TRIG_RIGHT 22
+#define ECHO_RIGHT 23
+
+#define ENA 25
+#define IN1 26
+#define IN2 27
+#define ENB 14
+#define IN3 12
+#define IN4 13
+
+#define PWM_FREQ       5000
+#define PWM_RESOLUTION 8
+#define PWM_CH_LEFT    0
+#define PWM_CH_RIGHT   1
+
+#define OBSTACLE_DIST_CM    30
+#define SIDE_WARN_DIST_CM   20
+#define FORWARD_SPEED       180
+#define TURN_SPEED          150
+#define TURN_DURATION_MS    400
+#define REVERSE_DURATION_MS 300
+#define LOOP_DELAY_MS       50
+
+long getDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  if (duration == 0) return -1;
+  return duration * 0.034 / 2;
+}
+
+void setMotorLeft(int speed, bool forward) {
+  speed = constrain(speed, 0, 255);
+  digitalWrite(IN1, forward ? HIGH : LOW);
+  digitalWrite(IN2, forward ? LOW  : HIGH);
+  ledcWrite(PWM_CH_LEFT, speed);
+}
+
+void setMotorRight(int speed, bool forward) {
+  speed = constrain(speed, 0, 255);
+  digitalWrite(IN3, forward ? HIGH : LOW);
+  digitalWrite(IN4, forward ? LOW  : HIGH);
+  ledcWrite(PWM_CH_RIGHT, speed);
+}
+
+void stopMotors() {
+  ledcWrite(PWM_CH_LEFT, 0);
+  ledcWrite(PWM_CH_RIGHT, 0);
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+}
+
+void moveForward(int speed = FORWARD_SPEED) {
+  setMotorLeft(speed, true);
+  setMotorRight(speed, true);
+}
+
+void moveBackward(int speed = FORWARD_SPEED) {
+  setMotorLeft(speed, false);
+  setMotorRight(speed, false);
+}
+
+void turnLeft(int speed = TURN_SPEED) {
+  setMotorLeft(speed, false);
+  setMotorRight(speed, true);
+}
+
+void turnRight(int speed = TURN_SPEED) {
+  setMotorLeft(speed, true);
+  setMotorRight(speed, false);
+}
+
+void navigate() {
+  long distFront = getDistance(TRIG_FRONT, ECHO_FRONT);
+  long distLeft  = getDistance(TRIG_LEFT,  ECHO_LEFT);
+  long distRight = getDistance(TRIG_RIGHT, ECHO_RIGHT);
+
+  Serial.printf("Front: %ld cm | Left: %ld cm | Right: %ld cm\n", distFront, distLeft, distRight);
+
+  if (distFront < 0 || distFront > OBSTACLE_DIST_CM) {
+    if (distLeft > 0 && distLeft < SIDE_WARN_DIST_CM) {
+      setMotorLeft(FORWARD_SPEED - 50, true);
+      setMotorRight(FORWARD_SPEED, true);
+    } else if (distRight > 0 && distRight < SIDE_WARN_DIST_CM) {
+      setMotorLeft(FORWARD_SPEED, true);
+      setMotorRight(FORWARD_SPEED - 50, true);
+    } else {
+      moveForward();
+    }
+    return;
+  }
+
+  stopMotors();
+  delay(150);
+  moveBackward();
+  delay(REVERSE_DURATION_MS);
+  stopMotors();
+  delay(150);
+
+  bool leftClear  = (distLeft  < 0 || distLeft  > OBSTACLE_DIST_CM);
+  bool rightClear = (distRight < 0 || distRight > OBSTACLE_DIST_CM);
+
+  if (leftClear && !rightClear) {
+    turnLeft();
+  } else if (rightClear && !leftClear) {
+    turnRight();
+  } else if (distLeft > distRight) {
+    turnLeft();
+  } else {
+    turnRight();
+  }
+
+  delay(TURN_DURATION_MS);
+  stopMotors();
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(TRIG_FRONT, OUTPUT); pinMode(ECHO_FRONT, INPUT);
+  pinMode(TRIG_LEFT,  OUTPUT); pinMode(ECHO_LEFT,  INPUT);
+  pinMode(TRIG_RIGHT, OUTPUT); pinMode(ECHO_RIGHT, INPUT);
+
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+
+  ledcSetup(PWM_CH_LEFT,  PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CH_RIGHT, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(ENA, PWM_CH_LEFT);
+  ledcAttachPin(ENB, PWM_CH_RIGHT);
+
+  stopMotors();
+  delay(2000);
+  Serial.println("Robot ready!");
+}
+
+void loop() {
+  navigate();
+  delay(LOOP_DELAY_MS);
+}
